@@ -1,6 +1,8 @@
 """Run an agent once and record what it did. Shared by every agent in app/registry.py."""
 
+from collections.abc import Callable
 from contextlib import closing
+from typing import Any
 
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel
@@ -26,11 +28,35 @@ def _building_id(db_path: str, tenant_id: str) -> str | None:
         return flat.building_id if flat else None
 
 
-def run_agent(name: str, graph: Runnable, inp: TriageInput, db_path: str) -> RunRecord:
+OnEvent = Callable[[str, Any], None]  # kind ("status" or "token") and its payload
+
+
+def _invoke(graph: Runnable, state: dict, config: dict, on_event: OnEvent | None) -> dict:
+    """graph.invoke, or graph.stream when a listener wants progress and reply tokens."""
+    if on_event is None:
+        return graph.invoke(state, config)
+    final: dict = {}
+    for mode, chunk in graph.stream(state, config, stream_mode=["custom", "messages", "values"]):
+        if mode == "values":
+            final = chunk
+        elif mode == "custom" and isinstance(chunk, dict) and "status" in chunk:
+            on_event("status", chunk["status"])
+        elif mode == "messages":
+            message, metadata = chunk
+            if metadata.get("langgraph_node") == "reply" and getattr(message, "text", ""):
+                on_event("token", message.text)
+    return final
+
+
+def run_agent(
+    name: str, graph: Runnable, inp: TriageInput, db_path: str, on_event: OnEvent | None = None
+) -> RunRecord:
     """Invoke graph with {"input": inp, "db_path": db_path} and record the run.
 
     The graph's final state must carry the GraphOutput fields. Never raises:
-    failures land in RunRecord.error.
+    failures land in RunRecord.error. With on_event, the graph is streamed and the
+    listener gets ("status", text) from nodes that report progress and ("token", text)
+    for each token of a node named "reply".
     """
     with closing(db.connect(db_path)) as conn:
         before = db.highest_ticket_number(conn)
@@ -45,7 +71,7 @@ def run_agent(name: str, graph: Runnable, inp: TriageInput, db_path: str) -> Run
     }
     try:
         output = GraphOutput.model_validate(
-            graph.invoke({"input": inp, "db_path": db_path}, config)
+            _invoke(graph, {"input": inp, "db_path": db_path}, config, on_event)
         )
         error = None
     except Exception as exc:

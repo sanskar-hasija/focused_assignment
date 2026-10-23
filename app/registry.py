@@ -7,6 +7,10 @@ app.run.run_agent, then add one entry here.
 from collections.abc import Callable
 
 from app.agent import run_triage
+from app.agent_v1 import run_triage_v1
 from app.models import RunRecord, TriageInput
 
-AGENTS: dict[str, Callable[[TriageInput, str], RunRecord]] = {"triage": run_triage}
+AGENTS: dict[str, Callable[[TriageInput, str], RunRecord]] = {
+    "triage": run_triage,  # V0: one tool-calling loop
+    "triage_v1": run_triage_v1,  # V1: fixed steps with a code gate
+}

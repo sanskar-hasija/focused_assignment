@@ -1,4 +1,4 @@
-.PHONY: setup seed test chat target graph dataset review smoke eval calibrate
+.PHONY: setup seed test chat ui target graph dataset review smoke eval calibrate compare replay
 
 AGENT ?= triage
 TENANT ?= T-003
@@ -10,6 +10,9 @@ PREFIX ?= baseline
 LIMIT ?=
 JUDGE ?= 1
 EXPERIMENT ?=
+BEFORE ?=
+AFTER ?=
+PROJECT ?= triage-prod-sim
 
 setup:
 	uv sync
@@ -23,11 +26,15 @@ test:
 chat:
 	uv run python -m app.cli --agent $(AGENT) --tenant $(TENANT) --now $(NOW)
 
+ui:
+	uv run streamlit run app/ui.py
+
 target:
 	uv run python -m app.eval_target
 
 graph:
 	uv run python -m app.agent
+	uv run python -m app.agent_v1
 
 dataset:
 	uv run python -m evals.push_dataset
@@ -43,3 +50,9 @@ eval:
 
 calibrate:
 	uv run python -m evals.calibrate $(if $(EXPERIMENT),--experiment $(EXPERIMENT))
+
+compare:
+	uv run python -m evals.compare --before $(BEFORE) --after $(AFTER)
+
+replay:
+	uv run python -m evals.replay --agent $(AGENT) --project $(PROJECT) $(if $(LIMIT),--limit $(LIMIT))
